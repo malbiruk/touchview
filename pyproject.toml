@@ -1,0 +1,32 @@
+[project]
+name = "touchview"
+version = "0.1.0"
+description = "Wayland overlays for visualizing touchpad gestures and keyboard shortcuts"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.13"
+authors = [{ name = "Klim Kostiuk" }]
+keywords = ["wayland", "touchpad", "overlay", "keyboard", "gestures", "layer-shell"]
+classifiers = [
+    "Environment :: Other Environment",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment",
+]
+dependencies = [
+    "evdev>=1.9.3",
+    "pycairo>=1.27",
+    "PyGObject>=3.50",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[project.scripts]
+touchview = "touchview:main"
+keyview = "keyview:main"
