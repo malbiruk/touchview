@@ -4,6 +4,10 @@ Wayland overlays for visualizing touchpad gestures and keyboard shortcuts. Shows
 
 Useful for demos, screen recordings, and showcasing compositor features.
 
+Example ([driftwm](https://github.com/malbiruk/driftwm) window movement):
+
+https://github.com/user-attachments/assets/363d7252-dc28-4cf0-9c30-b7ca2e617972
+
 ## Tools
 
 - **`touchview`** — touchpad finger position overlay (white dots on dark panel)
