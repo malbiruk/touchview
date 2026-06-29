@@ -1,12 +1,12 @@
 [project]
 name = "touchview"
 version = "0.1.0"
-description = "Wayland overlays for visualizing touchpad gestures and keyboard shortcuts"
+description = "Wayland overlays for visualizing touchpad/touchscreen gestures and keyboard shortcuts"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"
 authors = [{ name = "Klim Kostiuk" }]
-keywords = ["wayland", "touchpad", "overlay", "keyboard", "gestures", "layer-shell"]
+keywords = ["wayland", "touchpad", "touchscreen", "overlay", "keyboard", "gestures", "layer-shell"]
 classifiers = [
     "Environment :: Other Environment",
     "License :: OSI Approved :: MIT License",

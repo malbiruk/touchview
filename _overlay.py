@@ -46,6 +46,7 @@ __all__ = [
     "PangoCairo",
     "draw_rounded_rect",
     "parse_hex_color",
+    "setup_fullscreen_overlay",
     "setup_overlay_window",
     "watch_evdev",
 ]
@@ -74,18 +75,17 @@ def parse_hex_color(value):
     return (r / 255, g / 255, b / 255)
 
 
-def setup_overlay_window(win, position, margin):
-    """Configure a GTK window as a transparent click-through layer shell overlay."""
+def _init_layer(win):
+    """Common layer-shell setup: OVERLAY layer, no keyboard, no exclusive zone."""
     Gtk4LayerShell.init_for_window(win)
     Gtk4LayerShell.set_layer(win, Gtk4LayerShell.Layer.OVERLAY)
     Gtk4LayerShell.set_keyboard_mode(win, Gtk4LayerShell.KeyboardMode.NONE)
     Gtk4LayerShell.set_exclusive_zone(win, -1)
 
-    for edge in POSITION_ANCHORS[position]:
-        Gtk4LayerShell.set_anchor(win, edge, True)  # noqa: FBT003
-        Gtk4LayerShell.set_margin(win, edge, margin)
 
-    # Transparent background — custom CSS class + USER priority to override theme
+def _apply_transparent(win):
+    """Transparent background + click-through input region."""
+    # Custom CSS class + USER priority to override theme.
     win.add_css_class("transparent")
     css = Gtk.CssProvider()
     css.load_from_string(
@@ -96,9 +96,26 @@ def setup_overlay_window(win, position, margin):
         css,
         Gtk.STYLE_PROVIDER_PRIORITY_USER,
     )
-
-    # Click-through after realize
     win.connect("realize", _on_realize)
+
+
+def setup_overlay_window(win, position, margin):
+    """Configure a GTK window as a transparent click-through layer shell overlay."""
+    _init_layer(win)
+    for edge in POSITION_ANCHORS[position]:
+        Gtk4LayerShell.set_anchor(win, edge, True)  # noqa: FBT003
+        Gtk4LayerShell.set_margin(win, edge, margin)
+    _apply_transparent(win)
+
+
+def setup_fullscreen_overlay(win):
+    """Configure a GTK window as a transparent click-through overlay filling the
+    whole output — anchoring all four edges stretches the layer-shell surface."""
+    _init_layer(win)
+    for edge in (_EDGE.TOP, _EDGE.BOTTOM, _EDGE.LEFT, _EDGE.RIGHT):
+        Gtk4LayerShell.set_anchor(win, edge, True)  # noqa: FBT003
+        Gtk4LayerShell.set_margin(win, edge, 0)
+    _apply_transparent(win)
 
 
 def _on_realize(win):
