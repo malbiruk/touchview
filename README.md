@@ -58,6 +58,9 @@ touchview [OPTIONS]
 | `--dot-opacity F` | `0.95` | Dot opacity (0-1) |
 | `--dot-size PX` | `18` | Dot radius |
 | `--glow-size PX` | `48` | Glow radius |
+| `--trail-ms MS` | `0` | Fading trail duration in milliseconds, 0-2000 (`0` disables) |
+| `--trail-width PX` | `4` | Newest trail width in pixels, greater than 0 and at most 100 |
+| `--trail-opacity F` | `0.55` | Trail opacity multiplier (0-1), combined with dot opacity |
 | `--bg-color HEX` | `#000000` | Background color (touchpad mode) |
 | `--bg-opacity F` | `0.6` | Background opacity 0-1 (touchpad mode) |
 | `--height PX` | `400` | Panel height, width from aspect ratio (touchpad mode) |
@@ -76,7 +79,17 @@ touchview --source touchscreen
 
 # Rotated tablet — bump --rotate until the circles track your finger
 touchview --source touchscreen --rotate 270
+
+# Compact touchpad panel with fading finger trails for a demo recording
+touchview --height 180 --position bottom-right --bg-opacity 0.65 \
+  --dot-size 10 --glow-size 24 \
+  --trail-ms 450 --trail-width 4 --trail-opacity 0.55
 ```
+
+Trails are optional and work in both touchpad and touchscreen modes. Each finger
+gets a separate path in the dot color, fading and tapering with age. Trails keep
+fading after lift; touching again starts a new path rather than joining the old
+one. Try `--trail-ms 250` for shorter trails or `--trail-ms 700` for longer ones.
 
 ## keyview
 
@@ -118,3 +131,15 @@ Both tools support: `top-left`, `top`, `top-right`, `left`, `right`, `bottom-lef
 sudo usermod -aG input $USER
 # then log out and back in
 ```
+
+## Tests
+
+With the runtime dependencies installed, run:
+
+```sh
+LD_PRELOAD=libgtk4-layer-shell.so.0 python -m unittest discover -s tests -v
+```
+
+Preloading Layer Shell avoids the application's automatic restart when running
+the test runner. Tests use simulated input and offscreen drawing; no input-device
+access or running Wayland session is needed.
