@@ -25,7 +25,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["touchview.py", "keyview.py", "_overlay.py"]
+only-include = ["touchview.py", "keyview.py", "_overlay.py", "_trails.py"]
 
 [project.scripts]
 touchview = "touchview:main"

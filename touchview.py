@@ -4,6 +4,7 @@ import argparse
 import math
 import signal
 import sys
+import time
 
 import cairo
 import evdev
@@ -11,6 +12,7 @@ from evdev import ecodes
 
 from _overlay import (
     POSITION_ANCHORS,
+    GLib,
     Gtk,
     draw_rounded_rect,
     parse_hex_color,
@@ -18,9 +20,10 @@ from _overlay import (
     setup_overlay_window,
     watch_evdev,
 )
+from _trails import TrailHistory
 
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Touch finger position overlay")
     p.add_argument(
         "--source",
@@ -80,6 +83,27 @@ def parse_args():
         help="glow radius in pixels (default: 48)",
     )
     p.add_argument(
+        "--trail-ms",
+        type=float,
+        default=0,
+        metavar="MS",
+        help="trail duration, 0-2000 milliseconds; 0 disables (default: 0)",
+    )
+    p.add_argument(
+        "--trail-width",
+        type=float,
+        default=4,
+        metavar="PX",
+        help="newest trail width, greater than 0 and at most 100 pixels (default: 4)",
+    )
+    p.add_argument(
+        "--trail-opacity",
+        type=float,
+        default=0.55,
+        metavar="F",
+        help="trail opacity multiplier, 0-1 (default: 0.55)",
+    )
+    p.add_argument(
         "--height",
         type=int,
         default=400,
@@ -106,7 +130,14 @@ def parse_args():
         metavar="PX",
         help="edge margin in pixels (default: 20)",
     )
-    return p.parse_args()
+    cfg = p.parse_args(argv)
+    if not math.isfinite(cfg.trail_ms) or not 0 <= cfg.trail_ms <= 2000:
+        p.error("--trail-ms must be between 0 and 2000")
+    if not math.isfinite(cfg.trail_width) or not 0 < cfg.trail_width <= 100:
+        p.error("--trail-width must be greater than 0 and at most 100")
+    if not math.isfinite(cfg.trail_opacity) or not 0 <= cfg.trail_opacity <= 1:
+        p.error("--trail-opacity must be between 0 and 1")
+    return cfg
 
 
 def find_device(touchscreen):
@@ -167,6 +198,11 @@ class TouchOverlay(Gtk.Application):
         self.current_slot = 0
         self.touchscreen = cfg.source == "touchscreen"
         self.rotate = cfg.rotate
+        self.trails = TrailHistory(cfg.trail_ms / 1000)
+        self._trail_timer = None
+        self._trail_sync_dropped = False
+        self._trail_wait_for_contact = False
+        self.connect("shutdown", self._stop_trail_timer)
 
         x_info = absinfo[ecodes.ABS_MT_POSITION_X]
         y_info = absinfo[ecodes.ABS_MT_POSITION_Y]
@@ -203,9 +239,33 @@ class TouchOverlay(Gtk.Application):
     def _on_evdev(self, _fd, _condition):
         try:
             for event in self.dev.read():
+                if self.cfg.trail_ms > 0:
+                    if event.type == ecodes.EV_SYN and event.code == ecodes.SYN_DROPPED:
+                        # Discard trails and ignore events through the next
+                        # report; their coordinates may be incomplete.
+                        self.trails.clear()
+                        self._trail_sync_dropped = True
+                        self._trail_wait_for_contact = True
+                        self.area.queue_draw()
+                    if self._trail_sync_dropped:
+                        if event.type == ecodes.EV_SYN and event.code == ecodes.SYN_REPORT:
+                            self._trail_sync_dropped = False
+                        continue
                 if event.type == ecodes.EV_ABS:
                     self._handle_abs(event)
                 elif event.type == ecodes.EV_SYN and event.code == ecodes.SYN_REPORT:
+                    if self.cfg.trail_ms > 0:
+                        slots = self.slots
+                        if self._trail_wait_for_contact:
+                            # After lost input, only newly reported contacts
+                            # have a reliable identity. Don't revive old paths.
+                            slots = {
+                                slot: pos for slot, pos in slots.items()
+                                if slot in self.trails.active
+                            }
+                        self.trails.sample(slots, time.monotonic())
+                        if self.trails.paths and self._trail_timer is None:
+                            self._trail_timer = GLib.timeout_add(16, self._fade_trails)
                     self.area.queue_draw()
         except BlockingIOError:
             pass
@@ -217,8 +277,12 @@ class TouchOverlay(Gtk.Application):
         elif event.code == ecodes.ABS_MT_TRACKING_ID:
             if event.value == -1:
                 self.slots.pop(self.current_slot, None)
+                if self.cfg.trail_ms > 0:
+                    self.trails.end(self.current_slot)
             else:
                 self.slots.setdefault(self.current_slot, (0.5, 0.5))
+                if self.cfg.trail_ms > 0:
+                    self.trails.begin(self.current_slot)
         elif event.code == ecodes.ABS_MT_POSITION_X:
             nx = (event.value - self.x_min) / (self.x_max - self.x_min)
             _, oy = self.slots.get(self.current_slot, (0.5, 0.5))
@@ -228,34 +292,61 @@ class TouchOverlay(Gtk.Application):
             ox, _ = self.slots.get(self.current_slot, (0.5, 0.5))
             self.slots[self.current_slot] = (ox, ny)
 
-    def _draw(self, _area, cr, width, height):
+    def _fade_trails(self):
+        self.trails.prune(time.monotonic())
+        self.area.queue_draw()
+        if not self.trails.paths:
+            self._trail_timer = None
+            return False
+        return True
+
+    def _stop_trail_timer(self, *_args):
+        if self._trail_timer is not None:
+            GLib.source_remove(self._trail_timer)
+            self._trail_timer = None
+
+    def _position(self, nx, ny, width, height):
         if self.touchscreen:
-            # Circles at each finger's real screen position; no backdrop, so the
-            # actual screen stays visible under the overlay.
-            for nx, ny in self.slots.values():
-                ox, oy = _orient(nx, ny, self.rotate)
-                self._draw_dot(cr, ox * width, oy * height)
-            return
-
-        cfg = self.cfg
-        bg_r, bg_g, bg_b = cfg.bg_color
-        draw_rounded_rect(
-            cr,
-            width,
-            height,
-            cfg.radius,
-            bg_r,
-            bg_g,
-            bg_b,
-            cfg.bg_opacity,
-        )
-
+            ox, oy = _orient(nx, ny, self.rotate)
+            return ox * width, oy * height
         # Inset the dots so an edge touch's glow isn't clipped by the panel.
-        pad = cfg.glow_size
-        draw_w = width - 2 * pad
-        draw_h = height - 2 * pad
+        pad = self.cfg.glow_size
+        return pad + nx * (width - 2 * pad), pad + ny * (height - 2 * pad)
+
+    def _draw(self, _area, cr, width, height):
+        cfg = self.cfg
+        if not self.touchscreen:
+            bg_r, bg_g, bg_b = cfg.bg_color
+            draw_rounded_rect(
+                cr,
+                width,
+                height,
+                cfg.radius,
+                bg_r,
+                bg_g,
+                bg_b,
+                cfg.bg_opacity,
+            )
+
+        # Trails sit above the backdrop but below all current contact dots.
+        if cfg.trail_ms > 0:
+            self._draw_trails(cr, width, height)
         for nx, ny in self.slots.values():
-            self._draw_dot(cr, pad + nx * draw_w, pad + ny * draw_h)
+            self._draw_dot(cr, *self._position(nx, ny, width, height))
+
+    def _draw_trails(self, cr, width, height):
+        cfg = self.cfg
+        r, g, b = cfg.dot_color
+        cr.save()
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        for start, end, fade in self.trails.segments(time.monotonic()):
+            cr.new_path()
+            cr.set_line_width(cfg.trail_width * (0.35 + 0.65 * fade))
+            cr.set_source_rgba(r, g, b, cfg.trail_opacity * cfg.dot_opacity * fade)
+            cr.move_to(*self._position(*start, width, height))
+            cr.line_to(*self._position(*end, width, height))
+            cr.stroke()
+        cr.restore()
 
     def _draw_dot(self, cr, cx, cy):
         cfg = self.cfg
