@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/363d7252-dc28-4cf0-9c30-b7ca2e617972
 
 - Wayland compositor with layer shell support (sway, Hyprland, etc.)
 - `gtk4-layer-shell` (system package)
-- Access to `/dev/input/event*` (user must be in `input` group)
+- Access to the relevant `/dev/input/event*` device (via the `input` group or a per-device ACL; see [Permissions](#permissions))
 
 ## Install
 
@@ -114,7 +114,67 @@ Both tools support: `top-left`, `top`, `top-right`, `left`, `right`, `bottom-lef
 
 ## Permissions
 
+### Input group (persistent)
+
+For ongoing use, add your user to the `input` group, then log out and back in:
+
 ```sh
-sudo usermod -aG input $USER
+sudo usermod -aG input "$USER"
 # then log out and back in
 ```
+
+This grants broad access to input devices, including keyboards. If you only need
+TouchView for a demo or recording, the per-device alternative below limits access
+to just your touchpad.
+
+### Per-device ACL (temporary)
+
+An ACL grants your normal user access to one device without changing group
+membership or requiring a logout. These package commands are for Fedora,
+including Fedora Asahi; use your distribution's package manager elsewhere.
+
+1. Install the ACL utility and libinput command-line tools if needed:
+
+   ```sh
+   sudo dnf install acl libinput-utils
+   ```
+
+2. Find the **touchpad** entry and its `Kernel:` device path:
+
+   ```sh
+   sudo libinput list-devices
+   ```
+
+3. In the same terminal, set the device path and grant your user access. Replace
+   `/dev/input/event0` with the path found above:
+
+   ```sh
+   device=/dev/input/event0
+   sudo setfacl -m "u:$(id -un):rw" "$device"
+   ```
+
+   Read/write permission is used because Python's evdev device discovery checks
+   for both by default; read-only access can leave the device out of its results.
+
+4. Launch TouchView as your normal user, **without `sudo`**:
+
+   ```sh
+   touchview \
+     --height 180 \
+     --position bottom-right \
+     --bg-opacity 0.65 \
+     --dot-size 10 \
+     --glow-size 24
+   ```
+
+5. When finished, stop TouchView with **Ctrl+C**, then remove the user ACL entry
+   added above:
+
+   ```sh
+   sudo setfacl -x "u:$(id -un)" "$device"
+   ```
+
+The ACL applies to the current device node, so it may need to be reapplied after
+a reboot or device reconnection. Check the device path again, as its event number
+can change. Removing the ACL does not revoke access already granted through the
+`input` group.
